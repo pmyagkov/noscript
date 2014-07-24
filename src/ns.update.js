@@ -230,6 +230,27 @@
         this.view._getRequestViews({sync: [], async: []}, this.layout.views, this.params);
     };
 
+    ns.Update.prototype.__generateHTML = function() {
+        this.startTimer('collectViews');
+
+        var tree = {
+            'views': {}
+        };
+        this.view._getUpdateTree(tree, this.layout.views, this.params);
+        this.log('created render tree', tree);
+        this.stopTimer('collectViews');
+
+        var html;
+        if (!ns.object.isEmpty(tree.views)) {
+            this.startTimer('generateHTML');
+            html = this.applyTemplate(tree, this.params, this.layout);
+            this.log('generated html', html);
+            this.stopTimer('generateHTML');
+        }
+
+        return html;
+    };
+
     /**
      * Генерирует html недостающих видов
      * @private
@@ -240,26 +261,7 @@
             return this._rejectWithStatus(this.STATUS.EXPIRED);
         }
 
-        //  TODO: Проверить, что не начался уже более новый апдейт.
-
-        this.startTimer('collectViews');
-
-        var tree = {
-            'views': {}
-        };
-        this.view._getUpdateTree(tree, this.layout.views, this.params);
-        this.log('created render tree', tree);
-        this.stopTimer('collectViews');
-        
-        var html;
-        if (!ns.object.isEmpty(tree.views)) {
-            this.startTimer('generateHTML');
-            html = this.applyTemplate(tree, this.params, this.layout);
-            this.log('generated html', html);
-            this.stopTimer('generateHTML');
-        }
-
-        return Vow.fulfill(html);
+        return Vow.fulfill(this.__generateHTML());
     };
 
     /**
@@ -272,6 +274,13 @@
     ns.Update.prototype._insertNodes = function(node, async) {
         if (this._expired()) {
             return this._rejectWithStatus(this.STATUS.EXPIRED);
+        }
+
+        if (!node) {
+            // делаем синхронную отрисовку,
+            // чтобы обновлять ровно то, что отрендерили
+            var html = this.__generateHTML();
+            node = ns.html2node(html);
         }
 
         this.startTimer('insertNodes');
@@ -372,10 +381,8 @@
             .then(this._fulfill, this._reject)
          */
         this._requestAllModels().then(function(asyncResult) {
-            this._generateHTML().then(function(html) {
-                this._insertNodes(ns.html2node(html)).then(function() {
-                    this._fulfill(asyncResult);
-                }, this._reject, this);
+            this._insertNodes().then(function() {
+                this._fulfill(asyncResult);
             }, this._reject, this)
             // Если insertNodes кинет exception, то он ловится вот тут.
             // Иначе ns.Update повиснет и ничего не кинет
